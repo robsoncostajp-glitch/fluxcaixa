@@ -13,7 +13,7 @@ import {
     getPrevisao,
     getLancamentos,
     getCurvaSaldo30Dias,
-} } from '@/lib/queries'
+} from '@/lib/queries'
 
 // Tipos extraídos para facilitar
 export type KpiMensal = {
