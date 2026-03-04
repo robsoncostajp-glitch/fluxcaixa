@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { supabase } from './supabase'
 
 export async function getKpisMes(mes: string) {
   const { data } = await supabase
