@@ -1,32 +1,64 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/login?error=auth_failed`)
+    return NextResponse.redirect(`${origin}/login?erro=sem_codigo`)
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.exchangeCodeForSession(code)
+  const cookieStore = await cookies()
 
-  if (error) {
-    return NextResponse.redirect(`${origin}/login?error=auth_failed`)
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet: { name: string; value: string; options?: object }[]) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options as any)
+          )
+        },
+      },
+    }
+  )
+
+  const { error: sessionError } = await supabase.auth.exchangeCodeForSession(code)
+
+  if (sessionError) {
+    console.error('Erro ao trocar code por sessão:', sessionError.message)
+    return NextResponse.redirect(`${origin}/login?erro=sessao`)
   }
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-  if (!user?.email) {
-    return NextResponse.redirect(`${origin}/login?error=auth_failed`)
+  if (userError || !user) {
+    return NextResponse.redirect(`${origin}/login?erro=usuario`)
   }
 
-  const { data: perfil } = await supabase
+  // USA SERVICE ROLE para checar perfis sem depender de RLS
+  const supabaseAdmin = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      cookies: {
+        getAll() { return [] },
+        setAll() {},
+      },
+    }
+  )
+
+  const { data: perfil } = await supabaseAdmin
     .from('perfis')
     .select('id, role')
-    .eq('email', user.email)
-    .single()
+    .eq('email', user.email!)
+    .maybeSingle()
 
   if (!perfil) {
     try {
@@ -35,11 +67,11 @@ export async function GET(request: Request) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: user.email,
-          nome: user.user_metadata?.full_name ?? null,
+          nome: user.user_metadata?.full_name ?? user.email,
         }),
       })
     } catch (e) {
-      console.error('Erro ao notificar admin:', e)
+      console.error('Erro ao notificar acesso:', e)
     }
 
     await supabase.auth.signOut()
